@@ -19,20 +19,41 @@ server.listen(2718);
 
 var io = require("socket.io")(server);
 
-var users = [];
-
-var newUser = function(id, name) {
-    return {
-	'id': id,
-	'name': name
+function makeUsers() {
+    var obj = {
+	'users': []
     };
-};
+    
+    obj.add = function(id, name) {
+	obj.users.push({
+	    'id': id,
+	    'name': name,
+	    'ready': false
+	});
+    };
+    obj.remove = function(user) {
+	obj.users.splice(obj.users.indexOf(user), 1);
+    };
+    obj.getById = function(id) {
+	return obj.users.find(function(user) {
+	    return user.id === id;
+	});
+    };
+    obj.ready = function() {
+	var unready = obj.users.filter(function(user) {
+	    return user.ready === false;
+	});
+	return unready.length === 0;
+    };
+    obj.forEach = function(fn) {
+	obj.users.forEach(fn);
+    };
 
-var getUser = function(id) {
-    return users.find(function(user) {
-	return user.id === id;
-    });
+    return obj;
 }
+
+var users = makeUsers();
+console.log(users);
 
 io.on('connection', function(socket) {
     console.log("a user connected...");
@@ -41,16 +62,26 @@ io.on('connection', function(socket) {
 
     socket.on('new user', function(username) {
 	console.log("a new user " + username + " joined...");
-	users.push(newUser(socket.id, username));
+	users.add(socket.id, username);
 	io.emit('new user', username);
 	socket.emit('remove input');
     });
 
+    socket.on('user ready', function() {
+	var user = users.getById(socket.id);
+	user.ready = true;
+	socket.broadcast.emit('user ready', user.name);
+	// if all users are ready, start the game.
+	if (users.ready()) {
+	    console.log('all users ready - can start game.');
+	}
+    });
+
     socket.on('disconnect', function(reason) {
-	var user = getUser(socket.id);
+	var user = users.getById(socket.id);
 	if (user) {
 	    console.log(user.name + ' is disconnecting...');
-	    users.splice(users.indexOf(user), 1);
+	    users.remove(user);
 	    io.emit('delete user', user.name);
 	}
     });
