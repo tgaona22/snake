@@ -1,0 +1,10 @@
+To run this program, you need to have node.js installed.
+You can find it here: https://nodejs.org/en/download/
+
+To run the server, execute
+   node server.js <port number> <grid width> <grid height>
+where <port number> should be a valid port number and the other two
+arguments should be positive integers.
+
+If running locally, connect as a client by pointing your browser to
+   http://localhost:<portnumber>
