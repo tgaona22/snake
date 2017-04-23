@@ -116,25 +116,21 @@ function makeGrid(width, height) {
     obj.at = function(x, y) {
 	return obj.grid[y][x].entity;
     }
-
     obj.set = function(x, y, e) {
 	obj.grid[y][x].entity = e;
     }
-
     obj.addSnake = function(snake) {
 	snake.body.forEach(function(segment) {
 	    obj.set(segment.x, segment.y, snake);
 	});
 	obj.snakes.push(snake);
     }
-
     obj.removeSnake = function(snake) {
 	snake.body.forEach(function(segment) {
 	    obj.set(segment.x, segment.y, null);
 	});
 	obj.snakes.splice(obj.snakes.indexOf(snake), 1);
     }
-    
     obj.addFood = function() {
 	// Find an unoccupied position.
 	var x = getRandomInt(0, obj.width);
@@ -145,13 +141,11 @@ function makeGrid(width, height) {
 	}
 	obj.set(x, y, 'food');
     }
-
     function getRandomPosition() {
 	var x = getRandomInt(3, obj.width - 4);
 	var y = getRandomInt(3, obj.height - 4);
 	return pos(x, y);
     }
-
     obj.getStartPosition = function(direction) {
 	// Return a position that won't cause overlap with current snakes
 	var pos = getRandomPosition();
@@ -160,7 +154,6 @@ function makeGrid(width, height) {
 	}
 	return pos;
     }
-
     obj.clear = function() {
 	obj.grid.forEach(function(row) {
 	    row.forEach(function(cell) {
@@ -168,7 +161,6 @@ function makeGrid(width, height) {
 	    });
 	});
     }
-
     return obj;
 }
 
@@ -206,7 +198,6 @@ function makeSnake(id, color, grid) {
 	}
 	obj.lastTailPosition = pos(obj.tail().x, obj.tail().y);
     }
-
     obj.getNextHeadPosition = function() {
 	var head = obj.head()
 	switch(obj.direction) {
@@ -232,7 +223,6 @@ function makeSnake(id, color, grid) {
 	    return pos(head.x + 1, head.y);
 	}
     }
-
     obj.move = function() {
 	var nextPos = obj.getNextHeadPosition();
 	obj.lastTailPos = pos(obj.tail().x, obj.tail().y);
@@ -243,23 +233,18 @@ function makeSnake(id, color, grid) {
 	    nextPos = currentPos;
 	});
     }
-    
     obj.grow = function() {
 	obj.body.push(obj.lastTailPos);
     }
-
     obj.length = function() {
 	return obj.body.length;
     }
-
     obj.head = function() {
 	return obj.body[0];
     }
-
     obj.tail = function() {
 	return obj.body[obj.body.length - 1];
     }
-    
     return obj;
 }
 
@@ -276,6 +261,8 @@ var io = require("socket.io")(server);
 io.on('connection', function(socket) {
 
     socket.emit('init lobby', JSON.stringify(users));
+    // If the game has already started, don't allow new connections
+    // to try to join the lobby.
     if (gameStarted) {
 	socket.emit('spectate', JSON.stringify(users));
 	socket.emit('setup', grid.width, grid.height);
@@ -291,7 +278,7 @@ io.on('connection', function(socket) {
 	var user = users.getById(socket.id);
 	user.ready = true;
 	io.emit('user ready', user.name, user.color);
-	// if all users are ready, start the game.
+	// Once all users are ready, start the game.
 	if (users.ready()) {
 	    gameStarted = true;
 
@@ -308,6 +295,7 @@ io.on('connection', function(socket) {
 	}
     });
 
+    // Used when the client informs the server about a change in direction.
     socket.on('transmit direction', function(direction) {
 	var user = users.getById(socket.id);
 	if (user.active) {
@@ -330,19 +318,26 @@ io.on('connection', function(socket) {
 ************************************/
 
 function setup() {
-    // give each user a snake.
     users.forEach(function(user) {
 	user.snake = makeSnake(user.id, user.color, grid);
+	// Choose a direction and starting position and initialize the snake.
 	var dir = randomDirection();
 	var pos = grid.getStartPosition(dir);
 	user.snake.initialize(pos.x, pos.y, dir);
 	grid.addSnake(user.snake);
+	// Inform the client about the snake's initial direction
 	io.to(user.id).emit('set direction', dir);
     });
-    grid.addFood();
-    grid.addFood();
+    // Add food to the grid.
+    var foodCount = 2;
+    for (var i = 0; i < foodCount; i++) {
+	grid.addFood();
+    }
+
+    // Tell the clients to create a canvas element.
     io.emit('setup', grid.width, grid.height);
 
+    // Every 100ms, advance the game by a step.
     gameClock = setInterval(step, 100);
 }
 
@@ -371,14 +366,16 @@ function grow(snake) {
 }
 
 function step() {
+    // Perform collision detection.
     users.getActive().forEach(function(user) {
+	// If the snake is going to collide, remove it from the grid.
 	if (willCollide(user.snake)) {
-	    // remove the snake.
 	    grid.removeSnake(user.snake);
 	    user.active = false;
 	}
     });
 
+    // Move and grow the snakes.
     users.getActive().forEach(function(user) {	
 	var nextPos = user.snake.getNextHeadPosition();
 	var willGrow = grid.at(nextPos.x, nextPos.y) === 'food';
@@ -388,6 +385,7 @@ function step() {
 	}
     });
     
+    // Send the current grid state to the clients for drawing.
     io.emit('draw', JSON.stringify(grid));
 
     // If no active users remain, set a timer to restart the game.
@@ -398,7 +396,9 @@ function step() {
 }
 
 function reset() {
+    // To stop the game, stop calling step().
     clearInterval(gameClock);
+
     restarting = false;
     gameStarted = false;
 
@@ -409,13 +409,15 @@ function reset() {
 	user.active = true;
     });
     
+    // Send a reset message to the clients.
+    // The reset instructions depend on whether the client was a player or spectator.
     var keys = Object.keys(io.sockets.sockets);
     keys.forEach(function(key) {
 	if (!users.getById(io.sockets.sockets[key].id)) {
-	    io.sockets.sockets[key].emit('spectator reset');
+	    io.sockets.sockets[key].emit('reset', 'spectator');
 	}
 	else {
-	    io.sockets.sockets[key].emit('user reset');
+	    io.sockets.sockets[key].emit('reset', 'user');
 	}
     });
 }
