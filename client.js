@@ -1,5 +1,15 @@
 var socket = io();
-var userid;
+var codes = {37: 'left', 38: 'up', 39: 'right', 40: 'down'};
+var direction;
+
+// Listen for a key press to change direction.
+addEventListener('keydown', function(event) {
+    if (codes.hasOwnProperty(event.keyCode)) {
+	direction = codes[event.keyCode];
+	event.preventDefault();
+	console.log(direction);
+    }
+});
 
 var findLobbyNode = function(name) {
     var lobby = document.getElementById('lobby');
@@ -15,7 +25,6 @@ var button = document.getElementById('join_button');
 button.addEventListener('click', function(event) {
     var input = document.getElementById('username_input');
     if (input.value) {
-	userid = input.value;
 	socket.emit('new user', input.value);
     }
 });
@@ -36,9 +45,8 @@ socket.on('remove input', function() {
     ready_button.innerHTML = 'Ready';
     // When the user is ready, mark their name green and notify the server.
     ready_button.addEventListener('click', function(event) {
-	var node = findLobbyNode(userid);
-	node.style.color = 'green';
 	socket.emit('user ready');
+	document.body.removeChild(ready_button);
     });	
     document.body.appendChild(ready_button);
 });
@@ -62,6 +70,40 @@ socket.on('init lobby', function(data) {
     }
 });
 
-socket.on('user ready', function(name) {
-    findLobbyNode(name).style.color = 'green';
+socket.on('user ready', function(name, color) {
+    findLobbyNode(name).style.color = color;
 });
+
+socket.on('request direction', function() {
+    socket.emit('transmit direction', direction);
+});
+
+var scale = 10;
+socket.on('setup', function(width, height) {
+    var canvas = document.createElement('canvas');
+    canvas.width = width * scale;
+    canvas.height = height * scale;
+    document.body.prepend(canvas);
+});
+
+socket.on('draw', function(data) {
+    data = JSON.parse(data);
+    var grid = data.grid;
+
+    var canvas = document.getElementsByTagName('canvas')[0];
+    var ctx = canvas.getContext('2d');
+    ctx.fillStyle = 'tan';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    data.snakes.forEach(function(snake) {
+	ctx.fillStyle = snake.color;
+	ctx.strokeStyle = 'black';
+	snake.body.forEach(function(segment) {
+	    ctx.fillRect(segment.x * scale, segment.y * scale, scale, scale);
+	    ctx.strokeRect(segment.x * scale, segment.y * scale, scale, scale);
+	});
+    });
+
+});
+    
+    
