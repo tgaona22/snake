@@ -63,7 +63,8 @@ function makeUsers() {
 	    'id': id,
 	    'name': name,
 	    'ready': false,
-	    'color': getRandomColor()
+	    'color': getRandomColor(),
+	    'active': true
 	});
     };
     obj.remove = function(user) {
@@ -83,6 +84,11 @@ function makeUsers() {
     obj.forEach = function(fn) {
 	obj.users.forEach(fn);
     };
+    obj.getActive = function() {
+	return obj.users.filter(function(user) {
+	    return user.active;
+	});
+    };
 
     return obj;
 }
@@ -92,7 +98,7 @@ function makeGrid(width, height) {
 	'grid': [],
 	'width': width,
 	'height': height,
-	'snakes': []
+	'snakes': [],
     };
 
     for (var y = 0; y < obj.height; y++) {
@@ -107,16 +113,42 @@ function makeGrid(width, height) {
 	obj.grid.push(row);
     }
 
+    obj.at = function(x, y) {
+	return obj.grid[y][x].entity;
+    }
+
+    obj.set = function(x, y, e) {
+	obj.grid[y][x].entity = e;
+    }
+
     obj.addSnake = function(snake) {
 	snake.body.forEach(function(segment) {
-	    obj.grid[segment.y][segment.x] = snake;
+	    obj.set(segment.x, segment.y, snake);
 	});
 	obj.snakes.push(snake);
     }
 
+    obj.removeSnake = function(snake) {
+	snake.body.forEach(function(segment) {
+	    obj.set(segment.x, segment.y, null);
+	});
+	obj.snakes.splice(obj.snakes.indexOf(snake), 1);
+    }
+    
+    obj.addFood = function() {
+	// Find an unoccupied position.
+	var x = getRandomInt(0, obj.width);
+	var y = getRandomInt(0, obj.height);
+	while (obj.at(x, y)) {
+	    x = getRandomInt(0, obj.width);
+	    y = getRandomInt(0, obj.height);
+	}
+	obj.set(x, y, 'food');
+    }
+
     function getRandomPosition() {
-	var x = getRandomInt(3, obj.width - 3);
-	var y = getRandomInt(3, obj.height - 3);
+	var x = getRandomInt(3, obj.width - 4);
+	var y = getRandomInt(3, obj.height - 4);
 	return pos(x, y);
     }
 
@@ -129,15 +161,26 @@ function makeGrid(width, height) {
 	return pos;
     }
 
+    obj.clear = function() {
+	obj.grid.forEach(function(row) {
+	    row.forEach(function(cell) {
+		cell.entity = null;
+	    });
+	});
+    }
+
     return obj;
 }
 
-function makeSnake(id, color) {
+function makeSnake(id, color, grid) {
     var obj = {
 	'id': id,
 	'color': color,
 	'body': [],
-	'direction': ''
+	'direction': '',
+	'gridWidth': grid.width,
+	'gridHeight': grid.height,
+	'lastTailPosition': null
     };
 
     obj.initialize = function(x, y, dir) {
@@ -161,6 +204,48 @@ function makeSnake(id, color) {
 	    obj.body.push(pos(x-2, y));
 	    break;
 	}
+	obj.lastTailPosition = pos(obj.tail().x, obj.tail().y);
+    }
+
+    obj.getNextHeadPosition = function() {
+	var head = obj.head()
+	switch(obj.direction) {
+	case 'up':
+	    if (head.y === 0) {
+		return pos(head.x, obj.gridHeight - 1);
+	    }
+	    return pos(head.x, head.y - 1);
+	case 'down':
+	    if (head.y === obj.gridHeight - 1) {
+		return pos(head.x, 0);
+	    }
+	    return pos(head.x, head.y + 1);
+	case 'left':
+	    if (head.x === 0) {
+		return pos(obj.gridWidth - 1, head.y);
+	    }
+	    return pos(head.x - 1, head.y);
+	case 'right':
+	    if (head.x === obj.gridWidth - 1) {
+		return pos(0, head.y);
+	    }
+	    return pos(head.x + 1, head.y);
+	}
+    }
+
+    obj.move = function() {
+	var nextPos = obj.getNextHeadPosition();
+	obj.lastTailPos = pos(obj.tail().x, obj.tail().y);
+	obj.body.forEach(function(segment) {
+	    var currentPos = pos(segment.x, segment.y);
+	    segment.x = nextPos.x;
+	    segment.y = nextPos.y;
+	    nextPos = currentPos;
+	});
+    }
+    
+    obj.grow = function() {
+	obj.body.push(obj.lastTailPos);
     }
 
     obj.length = function() {
@@ -170,6 +255,10 @@ function makeSnake(id, color) {
     obj.head = function() {
 	return obj.body[0];
     }
+
+    obj.tail = function() {
+	return obj.body[obj.body.length - 1];
+    }
     
     return obj;
 }
@@ -178,14 +267,21 @@ function makeSnake(id, color) {
 ** Code for client/server communication **
 *****************************************/
 var users = makeUsers();
-var grid = makeGrid(60, 40);
+var grid = makeGrid(30, 20);
+var gameStarted = false;
+var restarting = false;
+var gameClock;
 
 var io = require("socket.io")(server);
 io.on('connection', function(socket) {
+
     socket.emit('init lobby', JSON.stringify(users));
+    if (gameStarted) {
+	socket.emit('spectate', JSON.stringify(users));
+	socket.emit('setup', grid.width, grid.height);
+    }
 
     socket.on('new user', function(username) {
-	console.log("a new user " + username + " joined...");
 	users.add(socket.id, username);
 	io.emit('new user', username);
 	socket.emit('remove input');
@@ -197,15 +293,32 @@ io.on('connection', function(socket) {
 	io.emit('user ready', user.name, user.color);
 	// if all users are ready, start the game.
 	if (users.ready()) {
-	    setup();
-	    setInterval(step, 500);
+	    gameStarted = true;
+
+	    // Force any sockets that are connected but not associated with a user
+	    // to spectate.
+	    var keys = Object.keys(io.sockets.sockets);
+	    keys.forEach(function(key) {
+		if (!users.getById(io.sockets.sockets[key].id)) {
+		    io.sockets.sockets[key].emit('spectate', JSON.stringify(users));
+		}
+	    });
+
+	    setTimeout(setup, 3000);
+	}
+    });
+
+    socket.on('transmit direction', function(direction) {
+	var user = users.getById(socket.id);
+	if (user.active) {
+	    user.snake.direction = direction;
 	}
     });
 
     socket.on('disconnect', function(reason) {
 	var user = users.getById(socket.id);
 	if (user) {
-	    console.log(user.name + ' is disconnecting...');
+	    grid.removeSnake(user.snake);
 	    users.remove(user);
 	    io.emit('delete user', user.name);
 	}
@@ -219,21 +332,92 @@ io.on('connection', function(socket) {
 function setup() {
     // give each user a snake.
     users.forEach(function(user) {
-	user.snake = makeSnake(user.id, user.color);
+	user.snake = makeSnake(user.id, user.color, grid);
 	var dir = randomDirection();
 	var pos = grid.getStartPosition(dir);
 	user.snake.initialize(pos.x, pos.y, dir);
 	grid.addSnake(user.snake);
+	io.to(user.id).emit('set direction', dir);
     });
+    grid.addFood();
+    grid.addFood();
     io.emit('setup', grid.width, grid.height);
+
+    gameClock = setInterval(step, 100);
+}
+
+function willCollide(snake) {
+    var nextPos = snake.getNextHeadPosition();
+    var entity = grid.at(nextPos.x, nextPos.y);
+    return (entity && entity != 'food');
+}
+
+function move(snake) {
+    // Update the grid - the only changes are the tail and next head.
+    var nextHeadPos = snake.getNextHeadPosition();
+    var tailPos = pos(snake.tail().x, snake.tail().y);
+    grid.set(nextHeadPos.x, nextHeadPos.y, snake);
+    grid.set(tailPos.x, tailPos.y, null);
+    // Move the snake.
+    snake.move();
+}
+
+function grow(snake) {
+    // Add a new tail to the snake and update the grid.
+    snake.grow();
+    grid.set(snake.tail().x, snake.tail().y, snake);
+    // Add a new piece of food to the grid.
+    grid.addFood();
 }
 
 function step() {
-    io.emit('request direction');
-    //users.forEach(function(user) {
+    users.getActive().forEach(function(user) {
+	if (willCollide(user.snake)) {
+	    // remove the snake.
+	    grid.removeSnake(user.snake);
+	    user.active = false;
+	}
+    });
 
-	
+    users.getActive().forEach(function(user) {	
+	var nextPos = user.snake.getNextHeadPosition();
+	var willGrow = grid.at(nextPos.x, nextPos.y) === 'food';
+	move(user.snake);
+	if (willGrow) {
+	    grow(user.snake);
+	}
+    });
+    
     io.emit('draw', JSON.stringify(grid));
+
+    // If no active users remain, set a timer to restart the game.
+    if (users.getActive().length === 0 && !restarting) {
+	restarting = true;
+	setTimeout(reset, 3000);
+    }
+}
+
+function reset() {
+    clearInterval(gameClock);
+    restarting = false;
+    gameStarted = false;
+
+    grid.clear();
+    
+    users.forEach(function(user) {
+	user.ready = false;
+	user.active = true;
+    });
+    
+    var keys = Object.keys(io.sockets.sockets);
+    keys.forEach(function(key) {
+	if (!users.getById(io.sockets.sockets[key].id)) {
+	    io.sockets.sockets[key].emit('spectator reset');
+	}
+	else {
+	    io.sockets.sockets[key].emit('user reset');
+	}
+    });
 }
 
 
