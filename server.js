@@ -3,7 +3,13 @@
 var http = require("http");
 var fs = require("fs");
 
-// Create the server and listen to port 2718.
+// The user should give a port number and a grid width and height as arguments.
+if (process.argv.length !== 5) {
+    console.log('Usage: node server.js <port number> <grid width> <grid height>');
+    return;
+}
+
+// Create the server and listen to the given port.
 var server = http.createServer(function(request, response) {
     if (request.url === '/client.js') {
 	response.writeHead(200, {"Content-Type": "text/js"});
@@ -16,7 +22,7 @@ var server = http.createServer(function(request, response) {
 	fileStream.pipe(response);
     }
 });
-server.listen(2718);
+server.listen(parseInt(process.argv[2], 10));
 
 /***********************************
 *** Helper Functions ***************
@@ -252,7 +258,7 @@ function makeSnake(id, color, grid) {
 ** Code for client/server communication **
 *****************************************/
 var users = makeUsers();
-var grid = makeGrid(30, 20);
+var grid = makeGrid(parseInt(process.argv[3]), parseInt(process.argv[4]));
 var gameStarted = false;
 var restarting = false;
 var gameClock;
