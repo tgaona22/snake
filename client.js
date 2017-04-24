@@ -61,8 +61,10 @@ var createReadyButton = function() {
 }
 
 // Initialize the client by adding a button and input so the user can join the lobby.
-document.body.prepend(createJoinButton());
-document.body.prepend(createUsernameInput());
+var btnNode = document.body.insertBefore(createJoinButton(), document.getElementById('lobby'));
+document.body.insertBefore(createUsernameInput(), btnNode);
+//document.body.prepend(createJoinButton());
+//document.body.prepend(createUsernameInput());
 
 // Listen for a key press to change direction.
 addEventListener('keydown', function(event) {
@@ -153,8 +155,9 @@ socket.on('reset', function(type) {
 	document.body.appendChild(createReadyButton());
     }
     else if (type === 'spectator') {
-	document.body.prepend(createJoinButton());
-	document.body.prepend(createUsernameInput());
+	spectator = false;
+	var node = document.body.insertBefore(createJoinButton(), document.getElementById('lobby'));
+	document.body.insertBefore(createUsernameInput(), node);
     }
     // Reset the color of the users in the lobby.
     var nodes = document.getElementsByTagName('li');
@@ -174,7 +177,8 @@ socket.on('setup', function(width, height) {
     var canvas = document.createElement('canvas');
     canvas.width = width * scale;
     canvas.height = height * scale;
-    document.body.prepend(canvas);
+    //document.body.prepend(canvas);
+    document.body.insertBefore(canvas, document.getElementById('lobby'));
 });
 
 var drawSnakeHead = function(ctx, snake) {
